@@ -1,10 +1,15 @@
 use log::{info, trace, warn};
-use sdl2::{pixels::Color, rect::Rect, render::Canvas, video::Window};
+use sdl2::{
+    event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::Canvas, video::Window,
+};
 use std::{fs, io::stdout};
 
 const RAM_SIZE: usize = 4096;
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGHT: usize = 32;
+
+const WINDOW_WIDTH: u32 = (SCREEN_WIDTH as u32) * SCALE;
+const WINDOW_HEIGHT: u32 = (SCREEN_HEIGHT as u32) * SCALE;
 
 const NUM_REGS: usize = 16;
 const STACK_SIZE: usize = 16;
@@ -69,7 +74,7 @@ impl Chip8 {
     }
 
     fn load_rom(&mut self, rom: &[u8]) {
-        dbg!("{}", rom.len());
+        println!("{}", rom.len());
         let size = rom.len() + START_ADDR as usize;
         self.memory[START_ADDR as usize..size].copy_from_slice(rom);
 
@@ -107,25 +112,25 @@ impl Chip8 {
         let first_byte: u16 = self.memory[self.pc as usize] as u16; // USIZE WILL OVERFLOW?
         let second_byte: u16 = self.memory[(self.pc + 1) as usize] as u16;
 
-        dbg!(
+        println!(
             "First byte: {:x} {:b} {}",
             self.memory[self.pc as usize],
             self.memory[self.pc as usize],
             self.memory[self.pc as usize]
         );
-        dbg!(
+        println!(
             "Second byte: {:x} {:b} {}",
             self.memory[self.pc as usize + 1],
             self.memory[self.pc as usize + 1],
             self.memory[self.pc as usize + 1]
         );
-        //dbg!("Bytes: {}", first_byte + second_byte);
+        //println!("Bytes: {}", first_byte + second_byte);
 
         let op = (first_byte << 8) | second_byte;
         //let combined = second_byte << 8;
 
-        //dbg!("Shift to left: {:x} {:b}", combined, combined);
-        dbg!("OP: {:x} {:b} {}", op, op, op);
+        //println!("Shift to left: {:x} {:b}", combined, combined);
+        println!("OP: {:x} {:b} {}", op, op, op);
         self.pc += 2;
         op
     }
@@ -138,42 +143,167 @@ impl Chip8 {
                 // CLEAR SCREEN
                 self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
             }
+            (0, 0, 0xE, 0xE) => {
+                // RET
+                self.pc = self.pop_from_stack();
+                println!("PC: {:x}", self.pc);
+            }
             (1, n1, n2, n3) => {
+                println!("-- JUMP --");
                 // JUMP
                 self.pc = (n1 << 8) | (n2 << 4) | n3;
-
-                dbg!("n1 n2 n3: {:x} {:x} {:x}", n1, n2, n3);
-                dbg!("PC: {:x}", self.pc);
             }
 
             (2, n1, n2, n3) => {
                 // CALL
-                self.pc = (n1 << 8) | (n2 << 4) | n3;
-                dbg!("n1 n2 n3: {:x} {:x} {:x}", n1, n2, n3);
-                dbg!("PC: {:x}", self.pc);
-
-                //dbg!("nn1: {:x} nn2: {:x} nn3: {:x}", n1)
+                println!("n1 n2 n3: {:x} {:x} {:x}", n1, n2, n3);
+                println!("PC: {:x}", self.pc);
 
                 self.push_to_stack(self.pc);
+                //self.pc = (n1 << 8) | (n2 << 4) | n3;
+                self.pc = (n1 << 8) | (n2 << 4) | n3;
+                println!("PC a: {:x}", self.pc);
             }
-            (0, 0, 0xE, 0xE) => {
-                // RET
-                self.pc = self.pop_from_stack();
-                dbg!("PC: {:x}", self.pc);
-            }
+            (3, x, n1, n2) => {
+                // Skip if VX = NN
+                let vx = self.v_reg[x as usize] as u16;
 
+                let nn = (n1 << 4) | n2;
+
+                if vx == nn {
+                    self.pc += 2;
+                }
+            }
+            (4, x, n1, n2) => {
+                // Skip if VX != NN
+                let vx = self.v_reg[x as usize] as u16;
+
+                let nn = (n1 << 4) | n2;
+
+                if vx != nn {
+                    self.pc += 2;
+                }
+            }
+            (5, x, y, 0) => {
+                // Skip if VX = VY
+                let vx = self.v_reg[x as usize] as u16;
+                let vy = self.v_reg[y as usize] as u16;
+
+                if vx == vy {
+                    self.pc += 2;
+                }
+            }
             (6, x, n1, n2) => {
                 // SET REGISTER TO VX
 
                 self.v_reg[x as usize] = ((n1 << 4) | n2) as u8;
             }
 
-            (7, x, n1, n2) => {
+            (7, x, _, _) => {
                 // ADD VALUE REGISTER TO VX
 
-                // TODO
-                //self.v_reg[x as usize] = ((n1 << 4) | n2) as u8;
+                self.v_reg[x as usize] = self.v_reg[x as usize].wrapping_add((op & 0xFF) as u8);
             }
+            (8, x, y, 0) => {
+                // Set VX to VY
+                let vy = self.v_reg[y as usize];
+
+                self.v_reg[x as usize] = vy;
+            }
+            (8, x, y, 1) => {
+                // Set VX to bitwise OR of VX and VY
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                self.v_reg[x as usize] = vx | vy;
+            }
+            (8, x, y, 2) => {
+                // Set VX to bitwise AND of VX and VY
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                self.v_reg[x as usize] = vx & vy;
+            }
+            (8, x, y, 3) => {
+                // Set VX to bitwise XOR of VX and VY
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                self.v_reg[x as usize] = vx ^ vy;
+            }
+            (8, x, y, 4) => {
+                // Set VX to VX + VY
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                let (new_vx, carry) =
+                    self.v_reg[x as usize].overflowing_add(self.v_reg[y as usize]);
+
+                println!("added new vx: {} {} {}", new_vx, vx, vy);
+                // Set carry bit
+                self.v_reg[0xF] = if carry { 1 } else { 0 };
+
+                self.v_reg[x as usize] = new_vx;
+            }
+            (8, x, y, 5) => {
+                // Set VX to VX - VY
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                let (new_vx, borrow) =
+                    self.v_reg[x as usize].overflowing_sub(self.v_reg[y as usize]);
+
+                println!("sub new vx: {} {} {}", new_vx, vx, vy);
+                // Set carry bit
+                self.v_reg[0xF] = if borrow { 0 } else { 1 };
+
+                self.v_reg[x as usize] = new_vx;
+            }
+
+            (8, x, y, 6) => {
+                // Right shift
+                // Put VY into VX and shift the value in VX 1 bit to the right.
+                // Set flag register to the bit shiftet out
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                let lsb = self.v_reg[x as usize] & 1;
+                self.v_reg[x as usize] >>= 1;
+                self.v_reg[0xF] = lsb;
+            }
+            (8, x, y, 0xE) => {
+                // Left shift ?
+                let msb = (self.v_reg[x as usize] >> 7) & 1;
+                println!("msb: {:x}", msb);
+                self.v_reg[x as usize] <<= 1;
+                println!("vreg: {:x}", self.v_reg[x as usize]);
+                self.v_reg[0xF] = msb;
+            }
+            (8, x, y, 7) => {
+                // Set VX to VY - VX
+                let vy = self.v_reg[y as usize];
+                let vx = self.v_reg[x as usize];
+
+                let (new_vx, borrow) =
+                    self.v_reg[y as usize].overflowing_sub(self.v_reg[x as usize]);
+
+                println!("sub new vx: {} {} {}", new_vx, vx, vy);
+                // Set carry bit
+                self.v_reg[0xF] = if borrow { 0 } else { 1 };
+
+                self.v_reg[x as usize] = new_vx;
+            }
+            (9, x, y, 0) => {
+                // Skip if VX != VY
+                let vx = self.v_reg[x as usize] as u16;
+                let vy = self.v_reg[y as usize] as u16;
+
+                if vx != vy {
+                    self.pc += 2;
+                }
+            }
+
+            (0xB, n1, n2, n3) => {}
             (0xA, n1, n2, n3) => {
                 // SET INDEX REGISTER I
 
@@ -182,28 +312,20 @@ impl Chip8 {
             (0xD, x, y, n) => {
                 // DISPLAY/DRAW
 
-                //let d = self.i_reg as f64 / SCREEN_WIDTH as f64;
-
-                //let start_y = d.floor() as u16;
-
-                //let start_x = self.i_reg as usize % SCREEN_WIDTH;
-
-                //dbg!("i: {} x: {} y: {}", self.i_reg, start_x, start_y);
-
                 let x_coord = self.v_reg[x as usize] as u16;
                 let y_coord = self.v_reg[y as usize] as u16;
 
-                dbg!("Coords x: {} y: {}", x_coord, y_coord);
+                println!("Coords x: {} y: {}", x_coord, y_coord);
 
                 let mut flipped = false;
                 for i in 0..n {
                     let sprite_byte = self.memory[(self.i_reg + i) as usize];
 
-                    dbg!("Spr btye: {:b} {:x}", sprite_byte, sprite_byte);
+                    println!("Spr btye: {:b} {:x}", sprite_byte, sprite_byte);
                     for j in 0..8 {
                         //let pixel_bit = sprite_byte[j];
 
-                        dbg!(
+                        println!(
                             "S: {:b} {:x}",
                             sprite_byte & (0b10000000 >> j),
                             sprite_byte & (0b10000000 >> j)
@@ -231,6 +353,33 @@ impl Chip8 {
         };
     }
 
+    fn parse_key(&mut self, keycode: Keycode) -> Option<usize> {
+        match keycode {
+            Keycode::Num0 => Some(0x0),
+            Keycode::Num1 => Some(0x1),
+            Keycode::Num2 => Some(0x2),
+            Keycode::Num3 => Some(0x3),
+            Keycode::Num4 => Some(0xC),
+            Keycode::Q => Some(0x4),
+            Keycode::W => Some(0x5),
+            Keycode::E => Some(0x6),
+            Keycode::R => Some(0xD),
+            Keycode::A => Some(0x7),
+            Keycode::S => Some(0x8),
+            Keycode::D => Some(0x9),
+            Keycode::F => Some(0xE),
+            Keycode::Z => Some(0xA),
+            Keycode::X => Some(0x0),
+            Keycode::C => Some(0xB),
+            Keycode::V => Some(0xF),
+            _ => panic!("Invalid key"),
+        }
+    }
+
+    fn key_press(&mut self, keycode: usize, pressed: bool) {
+        self.keys[keycode] = pressed;
+    }
+
     fn draw(&self, canvas: &mut Canvas<Window>) {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
@@ -251,20 +400,56 @@ impl Chip8 {
         let video_subsystem = sdl_context.video().unwrap();
 
         let window = video_subsystem
-            .window("rust-sdl2 demo", 800, 600)
+            .window("Chip8", WINDOW_WIDTH, WINDOW_HEIGHT)
             .position_centered()
+            .opengl()
             .build()
             .unwrap();
 
         let mut canvas = window.into_canvas().present_vsync().build().unwrap();
-        loop {
-            // Fectch
-            let op = self.fetch_instruction();
 
-            // Decode and execute
-            let exec = self.execute_instruction(op);
+        canvas.clear();
+        canvas.present();
 
-            self.draw(&mut canvas)
+        let mut event_pump = sdl_context.event_pump().unwrap();
+        let mut last_cycle_time = std::time::Instant::now();
+
+        'running: loop {
+            for event in event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => break 'running,
+                    Event::KeyDown { keycode, .. } => {
+                        let key = self
+                            .parse_key(keycode.expect("No key"))
+                            .expect("Invalid key");
+                        self.key_press(key, true);
+                    }
+                    Event::KeyUp { keycode, .. } => {
+                        let key = self
+                            .parse_key(keycode.expect("No key"))
+                            .expect("Invalid key");
+                        self.key_press(key, false);
+                    }
+                    _ => {}
+                };
+            }
+            let now = std::time::Instant::now();
+            if last_cycle_time + std::time::Duration::from_millis(16) <= now {
+                // Fetch
+                let op = self.fetch_instruction();
+
+                // Decode and execute
+                let exec = self.execute_instruction(op);
+
+                self.draw(&mut canvas);
+
+                last_cycle_time = std::time::Instant::now();
+            }
+            canvas.present();
         }
     }
 }
@@ -272,7 +457,8 @@ impl Chip8 {
 fn main() {
     let mut chip8 = Chip8::new();
 
-    let rom = fs::read("./rom/ibm.ch8").expect("Failed to read rom");
+    //let rom = fs::read("./rom/chip8.ch8").expect("Failed to read rom");
+    let rom = fs::read("./rom/BLINKY").expect("Failed to read rom");
 
     //chip8.execute_instruction(0x2D21);
 
