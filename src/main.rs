@@ -1,4 +1,5 @@
 use log::{info, trace, warn};
+use rand::random;
 use sdl2::{
     event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::Canvas, video::Window,
 };
@@ -213,23 +214,20 @@ impl Chip8 {
             (8, x, y, 1) => {
                 // Set VX to bitwise OR of VX and VY
                 let vy = self.v_reg[y as usize];
-                let vx = self.v_reg[x as usize];
 
-                self.v_reg[x as usize] = vx | vy;
+                self.v_reg[x as usize] |= vy;
             }
             (8, x, y, 2) => {
                 // Set VX to bitwise AND of VX and VY
                 let vy = self.v_reg[y as usize];
-                let vx = self.v_reg[x as usize];
 
-                self.v_reg[x as usize] = vx & vy;
+                self.v_reg[x as usize] &= vy;
             }
             (8, x, y, 3) => {
                 // Set VX to bitwise XOR of VX and VY
                 let vy = self.v_reg[y as usize];
-                let vx = self.v_reg[x as usize];
 
-                self.v_reg[x as usize] = vx ^ vy;
+                self.v_reg[x as usize] ^= vy;
             }
             (8, x, y, 4) => {
                 // Set VX to VX + VY
@@ -303,11 +301,32 @@ impl Chip8 {
                 }
             }
 
-            (0xB, n1, n2, n3) => {}
             (0xA, n1, n2, n3) => {
                 // SET INDEX REGISTER I
 
+                //let nnn = op & 0xFFF;
+                //self.i_reg = nnn;
                 self.i_reg = (n1 << 8) | (n2 << 4) | n3;
+            }
+            (0xB, n1, n2, n3) => {
+                let v0 = self.v_reg[0] as u16;
+                let nnn = (n1 << 8) | (n2 << 4) | n3;
+
+                let added = nnn.wrapping_add(v0);
+                let added2 = v0 + (op & 0xFFF);
+                println!("nnn: {}", nnn);
+                println!("opn: {}", op & 0xFFF);
+                println!("added {} added 2: {}", added, added2);
+
+                self.pc = added;
+            }
+            (0xC, x, n1, n2) => {
+                // Generate random number and AND it with NN
+                let rand: u8 = random();
+
+                let value = ((n1 << 4) | n2) as u8;
+
+                self.v_reg[x as usize] = rand & value;
             }
             (0xD, x, y, n) => {
                 // DISPLAY/DRAW
@@ -349,6 +368,93 @@ impl Chip8 {
 
                 //let start = self.screen[self.i_reg as usize];
             }
+            (0xE, x, 9, 0xE) => {
+                // Skip if key in VX is pressed
+                let key = self.v_reg[x as usize];
+                if self.keys[key as usize] {
+                    self.pc += 2;
+                }
+            }
+            (0xE, x, 0xA, 1) => {
+                // Skip if key in VX is not pressed
+                let key = self.v_reg[x as usize];
+                if !self.keys[key as usize] {
+                    self.pc += 2;
+                }
+            }
+            (0xF, x, 0, 7) => {
+                // Sets VX to the current value of the delay timer
+
+                self.v_reg[x as usize] = self.delay_timer;
+            }
+            (0xF, x, 1, 5) => {
+                // Sets the delay timer to the value in VX
+
+                self.delay_timer = self.v_reg[x as usize];
+            }
+            (0xF, x, 1, 8) => {
+                // Sets the sound timer to the value in VX
+
+                self.sound_timer = self.v_reg[x as usize];
+            }
+            (0xF, x, 1, 0xE) => {
+                // Add the value in VX to the index register I.
+                // ADD OTPION
+
+                self.i_reg += self.v_reg[x as usize] as u16;
+            }
+            (0xF, x, 0, 0xA) => {
+                // Waits for key input
+
+                println!("WAIT");
+                let key = self.keys.iter().enumerate().find(|(i, k)| **k);
+                if let Some(key) = key {
+                    self.v_reg[x as usize] = key.0 as u8;
+                } else {
+                    println!("No key");
+                }
+            }
+
+            (0xF, x, 2, 9) => {
+                self.i_reg = self.v_reg[x as usize] as u16 * 5;
+            }
+            (0xF, x, 3, 3) => {
+                let vx = self.v_reg[x as usize] as f64;
+
+                let hundreds = (vx / 100.0).floor() as u8;
+                let tens = ((vx / 10.0) % 10.0).floor() as u8;
+                let ones = (vx % 10.0).floor() as u8;
+
+                self.memory[self.i_reg as usize] = hundreds;
+                self.memory[self.i_reg as usize + 1] = tens;
+                self.memory[self.i_reg as usize + 2] = ones;
+                //r.trunc()
+
+                //if vx / 10.0 < 1.0 {
+                //        let n = (vx / 10.0).rou
+                //} else if vx / 100.0 < 1.0 {
+
+                // } else if vx / 1000.0 < 1.0 {
+
+                //}
+            }
+            (0xF, x, 5, 5) => {
+                // Stores the value in the registers from V0 to VX into memory from the address in I
+                // Eg. V0 holds 0x20; I holds 0x40; memory[0x40] = 0x20;
+                // Maybe option
+
+                for j in 0..=x {
+                    self.memory[self.i_reg as usize + j as usize] = self.v_reg[j as usize];
+                }
+            }
+            (0xF, x, 6, 5) => {
+                // Takes values in memory addresses V0 to VX and loads them into the variable registers
+                // Maybe option
+
+                for j in 0..=x {
+                    self.v_reg[j as usize] = self.memory[self.i_reg as usize + j as usize]
+                }
+            }
             _ => panic!("Invalid opcode: {:x}", op),
         };
     }
@@ -372,7 +478,7 @@ impl Chip8 {
             Keycode::X => Some(0x0),
             Keycode::C => Some(0xB),
             Keycode::V => Some(0xF),
-            _ => panic!("Invalid key"),
+            _ => None,
         }
     }
 
@@ -423,22 +529,22 @@ impl Chip8 {
                         ..
                     } => break 'running,
                     Event::KeyDown { keycode, .. } => {
-                        let key = self
-                            .parse_key(keycode.expect("No key"))
-                            .expect("Invalid key");
-                        self.key_press(key, true);
+                        let key = self.parse_key(keycode.expect("No key"));
+                        if let Some(key) = key {
+                            self.key_press(key, true);
+                        }
                     }
                     Event::KeyUp { keycode, .. } => {
-                        let key = self
-                            .parse_key(keycode.expect("No key"))
-                            .expect("Invalid key");
-                        self.key_press(key, false);
+                        let key = self.parse_key(keycode.expect("No key"));
+                        if let Some(key) = key {
+                            self.key_press(key, false);
+                        }
                     }
                     _ => {}
                 };
             }
             let now = std::time::Instant::now();
-            if last_cycle_time + std::time::Duration::from_millis(16) <= now {
+            if last_cycle_time + std::time::Duration::from_micros(16) <= now {
                 // Fetch
                 let op = self.fetch_instruction();
 
@@ -458,7 +564,8 @@ fn main() {
     let mut chip8 = Chip8::new();
 
     //let rom = fs::read("./rom/chip8.ch8").expect("Failed to read rom");
-    let rom = fs::read("./rom/BLINKY").expect("Failed to read rom");
+
+    let rom = fs::read("./rom/test_opcode.ch8").expect("Failed to read rom");
 
     //chip8.execute_instruction(0x2D21);
 
