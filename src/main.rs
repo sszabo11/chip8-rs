@@ -3,7 +3,7 @@ use rand::random;
 use sdl2::{
     event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::Canvas, video::Window,
 };
-use std::{fs, io::stdout};
+use std::{env, fs, io::stdout};
 
 const RAM_SIZE: usize = 4096;
 const SCREEN_WIDTH: usize = 64;
@@ -17,6 +17,8 @@ const STACK_SIZE: usize = 16;
 
 const NUM_KEYS: usize = 16;
 const START_ADDR: u16 = 0x200;
+
+const TICKS_PER_FRAME: u16 = 10;
 
 const SCALE: u32 = 15;
 
@@ -39,6 +41,21 @@ const FONTSET: [u8; FONTSET_SIZE] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+
+// GAME KEYS
+//
+// PONG:
+//  Left player
+//      Q - Down
+//      1 - Up
+//  Right player
+//      R - Down
+//      4 - Up
+// Tetris:
+//  W - Left
+//  E - Right
+//  Q - Flip
+//  A - Down
 
 struct Chip8 {
     memory: [u8; RAM_SIZE],
@@ -75,7 +92,6 @@ impl Chip8 {
     }
 
     fn load_rom(&mut self, rom: &[u8]) {
-        println!("{}", rom.len());
         let size = rom.len() + START_ADDR as usize;
         self.memory[START_ADDR as usize..size].copy_from_slice(rom);
 
@@ -113,25 +129,25 @@ impl Chip8 {
         let first_byte: u16 = self.memory[self.pc as usize] as u16; // USIZE WILL OVERFLOW?
         let second_byte: u16 = self.memory[(self.pc + 1) as usize] as u16;
 
-        println!(
-            "First byte: {:x} {:b} {}",
-            self.memory[self.pc as usize],
-            self.memory[self.pc as usize],
-            self.memory[self.pc as usize]
-        );
-        println!(
-            "Second byte: {:x} {:b} {}",
-            self.memory[self.pc as usize + 1],
-            self.memory[self.pc as usize + 1],
-            self.memory[self.pc as usize + 1]
-        );
+        //println!(
+        //    "First byte: {:x} {:b} {}",
+        //    self.memory[self.pc as usize],
+        //    self.memory[self.pc as usize],
+        //    self.memory[self.pc as usize]
+        //);
+        //println!(
+        //    "Second byte: {:x} {:b} {}",
+        //    self.memory[self.pc as usize + 1],
+        //    self.memory[self.pc as usize + 1],
+        //    self.memory[self.pc as usize + 1]
+        //);
         //println!("Bytes: {}", first_byte + second_byte);
 
         let op = (first_byte << 8) | second_byte;
         //let combined = second_byte << 8;
 
         //println!("Shift to left: {:x} {:b}", combined, combined);
-        println!("OP: {:x} {:b} {}", op, op, op);
+        //println!("OP: {:x} {:b} {}", op, op, op);
         self.pc += 2;
         op
     }
@@ -147,23 +163,18 @@ impl Chip8 {
             (0, 0, 0xE, 0xE) => {
                 // RET
                 self.pc = self.pop_from_stack();
-                println!("PC: {:x}", self.pc);
             }
             (1, n1, n2, n3) => {
-                println!("-- JUMP --");
                 // JUMP
                 self.pc = (n1 << 8) | (n2 << 4) | n3;
             }
 
             (2, n1, n2, n3) => {
                 // CALL
-                println!("n1 n2 n3: {:x} {:x} {:x}", n1, n2, n3);
-                println!("PC: {:x}", self.pc);
 
                 self.push_to_stack(self.pc);
                 //self.pc = (n1 << 8) | (n2 << 4) | n3;
                 self.pc = (n1 << 8) | (n2 << 4) | n3;
-                println!("PC a: {:x}", self.pc);
             }
             (3, x, n1, n2) => {
                 // Skip if VX = NN
@@ -237,7 +248,7 @@ impl Chip8 {
                 let (new_vx, carry) =
                     self.v_reg[x as usize].overflowing_add(self.v_reg[y as usize]);
 
-                println!("added new vx: {} {} {}", new_vx, vx, vy);
+                //println!("added new vx: {} {} {}", new_vx, vx, vy);
                 // Set carry bit
                 self.v_reg[0xF] = if carry { 1 } else { 0 };
 
@@ -251,7 +262,7 @@ impl Chip8 {
                 let (new_vx, borrow) =
                     self.v_reg[x as usize].overflowing_sub(self.v_reg[y as usize]);
 
-                println!("sub new vx: {} {} {}", new_vx, vx, vy);
+                //println!("sub new vx: {} {} {}", new_vx, vx, vy);
                 // Set carry bit
                 self.v_reg[0xF] = if borrow { 0 } else { 1 };
 
@@ -272,9 +283,9 @@ impl Chip8 {
             (8, x, y, 0xE) => {
                 // Left shift ?
                 let msb = (self.v_reg[x as usize] >> 7) & 1;
-                println!("msb: {:x}", msb);
+                //println!("msb: {:x}", msb);
                 self.v_reg[x as usize] <<= 1;
-                println!("vreg: {:x}", self.v_reg[x as usize]);
+                //println!("vreg: {:x}", self.v_reg[x as usize]);
                 self.v_reg[0xF] = msb;
             }
             (8, x, y, 7) => {
@@ -285,7 +296,7 @@ impl Chip8 {
                 let (new_vx, borrow) =
                     self.v_reg[y as usize].overflowing_sub(self.v_reg[x as usize]);
 
-                println!("sub new vx: {} {} {}", new_vx, vx, vy);
+                //println!("sub new vx: {} {} {}", new_vx, vx, vy);
                 // Set carry bit
                 self.v_reg[0xF] = if borrow { 0 } else { 1 };
 
@@ -309,16 +320,18 @@ impl Chip8 {
                 self.i_reg = (n1 << 8) | (n2 << 4) | n3;
             }
             (0xB, n1, n2, n3) => {
-                let v0 = self.v_reg[0] as u16;
-                let nnn = (n1 << 8) | (n2 << 4) | n3;
+                //let v0 = self.v_reg[0] as u16;
+                //let nnn = (n1 << 8) | (n2 << 4) | n3;
 
-                let added = nnn.wrapping_add(v0);
-                let added2 = v0 + (op & 0xFFF);
-                println!("nnn: {}", nnn);
-                println!("opn: {}", op & 0xFFF);
-                println!("added {} added 2: {}", added, added2);
+                //let added = nnn.wrapping_add(v0);
+                //let added2 = v0 + (op & 0xFFF);
+                //println!("nnn: {}", nnn);
+                //println!("opn: {}", op & 0xFFF);
+                //println!("added {} added 2: {}", added, added2);
 
-                self.pc = added;
+                //self.pc = added;
+                let nnn = op & 0xFFF;
+                self.pc = (self.v_reg[0] as u16) + nnn;
             }
             (0xC, x, n1, n2) => {
                 // Generate random number and AND it with NN
@@ -334,28 +347,30 @@ impl Chip8 {
                 let x_coord = self.v_reg[x as usize] as u16;
                 let y_coord = self.v_reg[y as usize] as u16;
 
-                println!("Coords x: {} y: {}", x_coord, y_coord);
+                //println!("Coords x: {} y: {}", x_coord, y_coord);
 
                 let mut flipped = false;
                 for i in 0..n {
                     let sprite_byte = self.memory[(self.i_reg + i) as usize];
 
-                    println!("Spr btye: {:b} {:x}", sprite_byte, sprite_byte);
+                    //println!("Spr btye: {:b} {:x}", sprite_byte, sprite_byte);
                     for j in 0..8 {
                         //let pixel_bit = sprite_byte[j];
 
-                        println!(
-                            "S: {:b} {:x}",
-                            sprite_byte & (0b10000000 >> j),
-                            sprite_byte & (0b10000000 >> j)
-                        );
+                        //println!(
+                        //    "S: {:b} {:x}",
+                        //    sprite_byte & (0b10000000 >> j),
+                        //    sprite_byte & (0b10000000 >> j)
+                        //);
                         if sprite_byte & (0b10000000 >> j) != 0 {
                             let x = (x_coord + j) as usize % SCREEN_WIDTH;
                             let y = (y_coord + i) as usize % SCREEN_WIDTH;
 
                             let idx = x + SCREEN_WIDTH * y;
-                            flipped |= self.screen[idx];
-                            self.screen[idx] ^= true;
+                            if idx < self.screen.len() {
+                                flipped |= self.screen[idx];
+                                self.screen[idx] ^= true;
+                            }
                         }
                     }
                 }
@@ -401,17 +416,32 @@ impl Chip8 {
                 // Add the value in VX to the index register I.
                 // ADD OTPION
 
-                self.i_reg += self.v_reg[x as usize] as u16;
+                //self.i_reg += self.v_reg[x as usize] as u16;
+                let vx = self.v_reg[x as usize] as u16;
+                self.i_reg = self.i_reg.wrapping_add(vx);
             }
             (0xF, x, 0, 0xA) => {
                 // Waits for key input
 
                 println!("WAIT");
-                let key = self.keys.iter().enumerate().find(|(i, k)| **k);
-                if let Some(key) = key {
-                    self.v_reg[x as usize] = key.0 as u8;
-                } else {
-                    println!("No key");
+                //let key = self.keys.iter().enumerate().find(|(i, k)| **k);
+                //if let Some(key) = key {
+                //    self.v_reg[x as usize] = key.0 as u8;
+                //} else {
+                //    println!("No key");
+                //}
+                let mut pressed = false;
+                for i in 0..self.keys.len() {
+                    if self.keys[i] {
+                        self.v_reg[x as usize] = i as u8;
+                        pressed = true;
+                        break;
+                    }
+                }
+
+                if !pressed {
+                    // Redo opcode
+                    self.pc -= 2;
                 }
             }
 
@@ -501,6 +531,24 @@ impl Chip8 {
         canvas.present();
     }
 
+    fn tick_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+
+        if self.sound_timer > 0 {
+            if self.sound_timer == 1 {
+                self.beep()
+            }
+
+            self.sound_timer -= 1;
+        }
+    }
+
+    fn beep(&self) {
+        println!("BEEP")
+    }
+
     fn run(&mut self) {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
@@ -543,18 +591,29 @@ impl Chip8 {
                     _ => {}
                 };
             }
+
             let now = std::time::Instant::now();
-            if last_cycle_time + std::time::Duration::from_micros(16) <= now {
-                // Fetch
+
+            for _ in 0..TICKS_PER_FRAME {
                 let op = self.fetch_instruction();
 
                 // Decode and execute
                 let exec = self.execute_instruction(op);
-
-                self.draw(&mut canvas);
-
-                last_cycle_time = std::time::Instant::now();
             }
+
+            self.tick_timers();
+            self.draw(&mut canvas);
+            //if last_cycle_time + std::time::Duration::from_micros(1) <= now {
+            //    // Fetch
+            //    let op = self.fetch_instruction();
+
+            //    // Decode and execute
+            //    let exec = self.execute_instruction(op);
+
+            //    self.draw(&mut canvas);
+
+            //    last_cycle_time = std::time::Instant::now();
+            //}
             canvas.present();
         }
     }
@@ -565,7 +624,18 @@ fn main() {
 
     //let rom = fs::read("./rom/chip8.ch8").expect("Failed to read rom");
 
-    let rom = fs::read("./rom/test_opcode.ch8").expect("Failed to read rom");
+    //let rom = fs::read("./rom/test_opcode.ch8").expect("Failed to read rom");
+
+    let args: Vec<String> = env::args().collect();
+    let rom_name = args.get(1).map(|s| s.as_str()).unwrap_or("TETRIS"); // <-- just the name, no --
+
+    // If you still want to support --TETRIS as a hidden easter egg:
+    let rom_name = rom_name.strip_prefix("--").unwrap_or(rom_name);
+
+    let path = format!("./rom/{}", rom_name); // or .bin, whatever your extension is
+    println!("Loading ROM: {}", path);
+
+    let rom = fs::read(&path).expect("Failed to read ROM");
 
     //chip8.execute_instruction(0x2D21);
 
