@@ -10,4 +10,4 @@ cargo run
 cargo run -- --UFO
 ```
 
-This project teaches you about bitwise operations and how CPU's work. I recommend every does this!
+This project teaches you about bitwise operations and how CPU's work. I recommend everyone does this!
